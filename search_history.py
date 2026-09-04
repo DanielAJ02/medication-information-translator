@@ -1,128 +1,69 @@
 """
-Module 5 — Search History
-Medication Information Translator
+search_history.py
+-------------------
+Defines the SearchHistory class - handles FILE HANDLING for the app.
+Saves every completed search to a local JSON file, so past searches
+persist even after the program closes, and can be loaded back and
+displayed later.
 
-Owner: Joey
-
-Responsibilities:
-    - Save medication searches to a local JSON file.
-    - Retrieve previous searches so users can view their search history.
-
-Data File:
-    data/search_history.json
-
-Functions:
-    save_search(name)  -> Saves a medication search (with a timestamp).
-    load_history()      -> Returns a list of previous searches.
+JSON was chosen because it maps naturally onto Python dictionaries/lists,
+and because Medication objects already have a to_dict() / from_dict()
+pair (see medication.py) specifically to make saving/loading easy.
 """
 
 import json
 import os
-from datetime import datetime
+from medication import Medication
 
-# Path to the JSON file that stores search history.
-# Kept relative to the project root so it works no matter which module
-# imports this file, as long as the app is run from the project root.
-HISTORY_FILE = os.path.join("data", "search_history.json")
+DEFAULT_FILE_PATH = "search_history.json"
 
 
-def _ensure_data_file_exists():
-    """Make sure the data folder and history file exist before we touch them.
+class SearchHistory:
+    """Handles saving and loading medication search history to/from a file."""
 
-    If the 'data' folder is missing, create it. If the JSON file is missing
-    or empty/corrupted, (re)initialize it with an empty list so the rest of
-    the module can always assume valid JSON is on disk.
-    """
-    folder = os.path.dirname(HISTORY_FILE)
-    if folder and not os.path.exists(folder):
-        os.makedirs(folder, exist_ok=True)
+    def __init__(self, file_path: str = DEFAULT_FILE_PATH):
+        self.file_path = file_path
 
-    if not os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, "w", encoding="utf-8") as file:
-            json.dump([], file)
-        return
+    def add_entry(self, medication: Medication) -> None:
+        """
+        Add one Medication search result to the history file.
+        Loads whatever's already saved, appends the new entry, then
+        writes the whole updated list back to the file.
+        """
+        history = self._load_raw()
+        history.append(medication.to_dict())
+        self._save_raw(history)
 
-    # File exists — check it actually contains valid JSON. If a previous
-    # run crashed mid-write, or the file was hand-edited badly, this
-    # recovers gracefully instead of crashing the whole app.
-    try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as file:
-            json.load(file)
-    except (json.JSONDecodeError, ValueError):
-        with open(HISTORY_FILE, "w", encoding="utf-8") as file:
-            json.dump([], file)
+    def get_all(self) -> list:
+        """
+        Return every past search as a list of Medication objects,
+        most recent last (same order they were saved in).
+        """
+        raw_history = self._load_raw()
+        return [Medication.from_dict(entry) for entry in raw_history]
 
-
-def save_search(name):
-    """Save a medication search to the local history file.
-
-    Args:
-        name (str): The medication name the user searched for.
-
-    Raises:
-        ValueError: If `name` is empty, blank, or not a string.
-
-    Each entry is stored as a dict with the medication name and a timestamp,
-    e.g. {"medication": "Ibuprofen", "timestamp": "2026-07-25T14:32:00"}.
-    """
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError("Medication name must be a non-empty string.")
-
-    clean_name = name.strip()
-
-    _ensure_data_file_exists()
-
-    try:
-        history = load_history()
-
-        entry = {
-            "medication": clean_name,
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-        }
-        history.append(entry)
-
-        with open(HISTORY_FILE, "w", encoding="utf-8") as file:
-            json.dump(history, file, indent=2)
-
-    except (OSError, IOError) as error:
-        # Covers permission errors, disk issues, etc. We don't want a
-        # failed history save to crash the whole medication lookup flow.
-        print(f"⚠️ Could not save search history: {error}")
-
-
-def load_history():
-    """Load and return the list of previous medication searches.
-
-    Returns:
-        list[dict]: A list of previous search entries, most recent last.
-                     Returns an empty list if there is no history yet or
-                     if the history file could not be read.
-    """
-    _ensure_data_file_exists()
-
-    try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as file:
-            history = json.load(file)
-
-        if not isinstance(history, list):
-            # Defensive check: file was tampered with / not the shape we expect.
+    def _load_raw(self) -> list:
+        """
+        Internal helper: read the raw list of dictionaries from the file.
+        Handles two expected failure cases gracefully:
+          - the file doesn't exist yet (first run) -> returns an empty list
+          - the file exists but contains invalid/corrupted JSON -> also
+            returns an empty list, rather than crashing the whole program
+        """
+        if not os.path.exists(self.file_path):
             return []
 
-        return history
+        try:
+            with open(self.file_path, "r") as file:
+                return json.load(file)
+        except json.JSONDecodeError:
+            return []
 
-    except (json.JSONDecodeError, OSError, IOError) as error:
-        print(f"⚠️ Could not load search history: {error}")
-        return []
+    def _save_raw(self, history: list) -> None:
+        """Internal helper: write the given list of dictionaries to the file as JSON."""
+        with open(self.file_path, "w") as file:
+            json.dump(history, file, indent=2)
 
-
-# ---------------------------------------------------------------------------
-# Quick manual test — run this file directly to see it work in isolation.
-# (Remove or leave in as a demo; won't run when imported by the main app.)
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    save_search("Ibuprofen")
-    save_search("Amoxicillin")
-
-    print("Current search history:")
-    for entry in load_history():
-        print(f" - {entry['medication']} (searched at {entry['timestamp']})")
+    def count(self) -> int:
+        """Return how many searches have been saved in total."""
+        return len(self._load_raw())
